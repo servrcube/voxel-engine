@@ -1,10 +1,74 @@
-struct WindowMgr {
-    event_loop: EventLoop<()>,
-    surface: Arc<Surface<Window>>,
+use crate::base::{Base, BaseOptions};
+use bytemuck::{Pod, Zeroable};
+use cgmath::{Matrix3, Matrix4, Point3, Rad};
+use std::sync::Arc;
+use vulkano::{
+    buffer::{
+        cpu_pool::CpuBufferPoolChunk, BufferAccess, BufferContents, BufferUsage,
+        CpuAccessibleBuffer, CpuBufferPool, TypedBufferAccess,
+    },
+    command_buffer::{
+        AutoCommandBufferBuilder, CommandBufferExecFuture, CommandBufferUsage,
+        PrimaryAutoCommandBuffer, PrimaryCommandBuffer, SubpassContents,
+    },
+    descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
+    device::{
+        physical::{PhysicalDevice, PhysicalDeviceType},
+        Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo,
+    },
+    image::{view::ImageView, ImageAccess, ImageUsage, SwapchainImage},
+    impl_vertex,
+    instance::{Instance, InstanceCreateInfo},
+    memory::MemoryPool,
+    pipeline::{
+        graphics::{
+            input_assembly::{InputAssemblyState, PrimitiveTopology},
+            vertex_input::BuffersDefinition,
+            viewport::{Viewport, ViewportState},
+        },
+        ComputePipeline, GraphicsPipeline, Pipeline, PipelineBindPoint,
+    },
+    render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
+    shader::ShaderModule,
+    swapchain::{
+        acquire_next_image, AcquireError, PresentFuture, Surface, Swapchain,
+        SwapchainAcquireFuture, SwapchainCreateInfo, SwapchainCreationError,
+    },
+    sync::{self, FenceSignalFuture, FlushError, GpuFuture, JoinFuture},
+};
+use vulkano_win::VkSurfaceBuild;
+
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
+pub struct Vertex {
+    pub position: [f32; 3],
+}
+impl_vertex!(Vertex, position);
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
+pub struct Color {
+    pub color_in: [f32; 3],
+}
+impl_vertex!(Color, color_in);
+
+const TOPOLOGY_TYPE: PrimitiveTopology = PrimitiveTopology::TriangleList;
+
+
+use winit::{
+    event::{Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    window::{Window, WindowBuilder},
+};
+
+pub struct WindowMgr {
+    pub event_loop: EventLoop<()>,
+    pub surface: Arc<Surface<Window>>,
 }
 
 impl WindowMgr {
-    fn init(base: &Base) -> Self {
+    pub fn init(base: &Base) -> Self {
         let event_loop = EventLoop::new();
         let surface = WindowBuilder::new()
             //.with_decorations(false)
@@ -19,24 +83,24 @@ impl WindowMgr {
     }
 }
 
-struct GraphMgr {
-    swapchain: Arc<Swapchain<Window>>,
-    images: Vec<Arc<SwapchainImage<Window>>>,
-    render_pass: Arc<RenderPass>,
-    graph_pipeline: Arc<GraphicsPipeline>,
-    framebuffers: Vec<Arc<Framebuffer>>,
-    previous_frame_end: Option<Box<dyn GpuFuture>>,
+pub struct GraphMgr {
+    pub swapchain: Arc<Swapchain<Window>>,
+    pub images: Vec<Arc<SwapchainImage<Window>>>,
+    pub render_pass: Arc<RenderPass>,
+    pub graph_pipeline: Arc<GraphicsPipeline>,
+    pub framebuffers: Vec<Arc<Framebuffer>>,
+    pub previous_frame_end: Option<Box<dyn GpuFuture>>,
 }
 
-struct GraphStore {
-    vs: Arc<ShaderModule>,
-    fs: Arc<ShaderModule>,
-    viewport: Viewport,
-    recreate_swapchain: bool,
+pub struct GraphStore {
+    pub vs: Arc<ShaderModule>,
+    pub fs: Arc<ShaderModule>,
+    pub viewport: Viewport,
+    pub recreate_swapchain: bool,
 }
 
 impl GraphMgr {
-    fn init(base: &Base, window_mgr: &WindowMgr, graph_store: &mut GraphStore) -> Self {
+    pub fn init(base: &Base, window_mgr: &WindowMgr, graph_store: &mut GraphStore) -> Self {
         let (swapchain, images) = Self::create_swapchain_and_images(base, window_mgr);
         let render_pass = Self::create_renderpass(&swapchain, base);
         let graph_pipeline = Self::create_graphics_pipeline(graph_store, &render_pass, base);
@@ -57,7 +121,7 @@ impl GraphMgr {
         }
     }
 
-    fn create_swapchain_and_images(
+    pub fn create_swapchain_and_images(
         base: &Base,
         window_mgr: &WindowMgr,
     ) -> (Arc<Swapchain<Window>>, Vec<Arc<SwapchainImage<Window>>>) {
@@ -115,7 +179,7 @@ impl GraphMgr {
         )
         .unwrap()
     }
-    fn create_renderpass(swapchain: &Arc<Swapchain<Window>>, base: &Base) -> Arc<RenderPass> {
+    pub fn create_renderpass(swapchain: &Arc<Swapchain<Window>>, base: &Base) -> Arc<RenderPass> {
         vulkano::single_pass_renderpass!(
             base.device.clone(),
             attachments: {
@@ -146,17 +210,14 @@ impl GraphMgr {
         .unwrap()
     }
 
-    fn create_graphics_pipeline(
+    pub fn create_graphics_pipeline(
         shaders: &GraphStore,
         render_pass: &Arc<RenderPass>,
         base: &Base,
     ) -> Arc<GraphicsPipeline> {
         GraphicsPipeline::start()
             // We need to indicate the layout of the vertices.
-            .vertex_input_state(
-                BuffersDefinition::new()    
-                    .vertex::<Vertex>()
-            )
+            .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
             // A Vulkan shader can in theory contain multiple entry points, so we have to specify
             // which one.
             .vertex_shader(shaders.vs.entry_point("main").unwrap(), ())
@@ -174,7 +235,7 @@ impl GraphMgr {
             .unwrap()
     }
 
-    fn window_size_dependent_setup(
+    pub fn window_size_dependent_setup(
         images: &[Arc<SwapchainImage<Window>>],
         render_pass: Arc<RenderPass>,
         viewport: &mut Viewport,
@@ -198,7 +259,7 @@ impl GraphMgr {
             .collect::<Vec<_>>()
     }
 
-    fn recreate_framebuffer(&mut self, graph_store: &mut GraphStore) {
+    pub fn recreate_framebuffer(&mut self, graph_store: &mut GraphStore) {
         self.framebuffers = Self::window_size_dependent_setup(
             &self.images,
             self.render_pass.clone(),
@@ -206,11 +267,11 @@ impl GraphMgr {
         );
     }
 
-    fn create_previous_frame_end(base: &Base) -> Option<Box<dyn GpuFuture>> {
+    pub fn create_previous_frame_end(base: &Base) -> Option<Box<dyn GpuFuture>> {
         Some(sync::now(base.device.clone()).boxed())
     }
 
-    fn recreate_previous_frame_end(
+    pub fn recreate_previous_frame_end(
         &mut self,
         graph_store: &mut GraphStore,
         device: Arc<Device>,
@@ -242,7 +303,11 @@ impl GraphMgr {
         }
     }
 
-    fn free_resources(&mut self) {
+    pub fn free_resources(&mut self) {
         self.previous_frame_end.as_mut().unwrap().cleanup_finished();
     }
+}
+
+fn main() {
+    //do nothing
 }
