@@ -16,7 +16,7 @@ use vulkano::{
         physical::{PhysicalDevice, PhysicalDeviceType},
         Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo,
     },
-    image::{view::ImageView, ImageAccess, ImageUsage, SwapchainImage},
+    image::{view::ImageView, ImageAccess, ImageUsage, SwapchainImage, AttachmentImage},
     impl_vertex,
     instance::{Instance, InstanceCreateInfo},
     memory::MemoryPool,
@@ -25,6 +25,7 @@ use vulkano::{
             input_assembly::{InputAssemblyState, PrimitiveTopology},
             vertex_input::BuffersDefinition,
             viewport::{Viewport, ViewportState},
+            depth_stencil::{DepthStencilState},
         },
         ComputePipeline, GraphicsPipeline, Pipeline, PipelineBindPoint,
     },
@@ -35,6 +36,7 @@ use vulkano::{
         SwapchainAcquireFuture, SwapchainCreateInfo, SwapchainCreationError,
     },
     sync::{self, FenceSignalFuture, FlushError, GpuFuture, JoinFuture},
+    format::Format,
 };
 use vulkano_win::VkSurfaceBuild;
 
@@ -95,19 +97,18 @@ pub struct GraphMgr {
 pub struct GraphStore {
     pub vs: Arc<ShaderModule>,
     pub fs: Arc<ShaderModule>,
-    pub viewport: Viewport,
     pub recreate_swapchain: bool,
 }
 
 impl GraphMgr {
-    pub fn init(base: &Base, window_mgr: &WindowMgr, graph_store: &mut GraphStore) -> Self {
+    pub fn init(base: &Base, window_mgr: &WindowMgr, graph_store: &GraphStore) -> Self {
         let (swapchain, images) = Self::create_swapchain_and_images(base, window_mgr);
         let render_pass = Self::create_renderpass(&swapchain, base);
-        let graph_pipeline = Self::create_graphics_pipeline(graph_store, &render_pass, base);
+        let graph_pipeline = Self::create_graphics_pipeline(graph_store, &render_pass, &base.device, &images);
         let framebuffers = Self::window_size_dependent_setup(
             &images,
             render_pass.clone(),
-            &mut graph_store.viewport,
+            &base.device
         );
         let previous_frame_end = Self::create_previous_frame_end(&base);
 
@@ -180,68 +181,77 @@ impl GraphMgr {
         .unwrap()
     }
     pub fn create_renderpass(swapchain: &Arc<Swapchain<Window>>, base: &Base) -> Arc<RenderPass> {
-        vulkano::single_pass_renderpass!(
-            base.device.clone(),
-            attachments: {
-                // `color` is a custom name we give to the first and only attachment.
-                color: {
-                    // `load: Clear` means that we ask the GPU to clear the content of this
-                    // attachment at the start of the drawing.
-                    load: Clear,
-                    // `store: Store` means that we ask the GPU to store the output of the draw
-                    // in the actual image. We could also ask it to discard the result.
-                    store: Store,
-                    // `format: <ty>` indicates the type of the format of the image. This has to
-                    // be one of the types of the `vulkano::format` module (or alternatively one
-                    // of your structs that implements the `FormatDesc` trait). Here we use the
-                    // same format as the swapchain.
-                    format: swapchain.image_format(),
-                    // TODO:
-                    samples: 1,
-                }
+        vulkano::single_pass_renderpass!(base.device.clone(),
+        attachments: {
+            color: {
+                load: Clear,
+                store: Store,
+                format: swapchain.image_format(),
+                samples: 1,
             },
-            pass: {
-                // We use the attachment named `color` as the one and only color attachment.
-                color: [color],
-                // No depth-stencil attachment is indicated with empty brackets.
-                depth_stencil: {}
+            depth: {
+                load: Clear,
+                store: DontCare,
+                format: Format::D16_UNORM,
+                samples: 1,
             }
-        )
-        .unwrap()
+        },
+        pass: {
+            color: [color],
+            depth_stencil: {depth}
+        }
+    )
+    .unwrap()
     }
 
     pub fn create_graphics_pipeline(
-        shaders: &GraphStore,
+        graph_store: &GraphStore,
         render_pass: &Arc<RenderPass>,
-        base: &Base,
+        device: &Arc<Device>,
+        images: &[Arc<SwapchainImage<Window>>]
     ) -> Arc<GraphicsPipeline> {
+
+        let dimensions = images[0].dimensions().width_height();
+
         GraphicsPipeline::start()
             // We need to indicate the layout of the vertices.
             .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
             // A Vulkan shader can in theory contain multiple entry points, so we have to specify
             // which one.
-            .vertex_shader(shaders.vs.entry_point("main").unwrap(), ())
+            .vertex_shader(graph_store.vs.entry_point("main").unwrap(), ())
             // The content of the vertex buffer describes a list of triangles.
             .input_assembly_state(InputAssemblyState::new().topology(TOPOLOGY_TYPE))
             // Use a resizable viewport set to draw over the entire window
-            .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
+            .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([
+                Viewport {
+                    origin: [0.0, 0.0],
+                    dimensions: [dimensions[0] as f32, dimensions[1] as f32],
+                    depth_range: 0.0..1.0,
+                },
+            ]))
             // See `vertex_shader`.
-            .fragment_shader(shaders.fs.entry_point("main").unwrap(), ())
+            .fragment_shader(graph_store.fs.entry_point("main").unwrap(), ())
+            .depth_stencil_state(DepthStencilState::simple_depth_test())
+
             // We have to indicate which subpass of which render pass this pipeline is going to be used
             // in. The pipeline will only be usable from this particular subpass.
             .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
             // Now that our builder is filled, we call `build()` to obtain an actual pipeline.
-            .build(base.device.clone())
+            .build(device.clone())
             .unwrap()
     }
 
     pub fn window_size_dependent_setup(
         images: &[Arc<SwapchainImage<Window>>],
         render_pass: Arc<RenderPass>,
-        viewport: &mut Viewport,
+        device: &Arc<Device>
     ) -> Vec<Arc<Framebuffer>> {
         let dimensions = images[0].dimensions().width_height();
-        viewport.dimensions = [dimensions[0] as f32, dimensions[1] as f32];
+
+        let depth_buffer = ImageView::new_default(
+            AttachmentImage::transient(device.clone(), dimensions, Format::D16_UNORM).unwrap(),
+        )
+        .unwrap();
 
         images
             .iter()
@@ -250,7 +260,7 @@ impl GraphMgr {
                 Framebuffer::new(
                     render_pass.clone(),
                     FramebufferCreateInfo {
-                        attachments: vec![view],
+                        attachments: vec![view, depth_buffer.clone()],
                         ..Default::default()
                     },
                 )
@@ -259,12 +269,16 @@ impl GraphMgr {
             .collect::<Vec<_>>()
     }
 
-    pub fn recreate_framebuffer(&mut self, graph_store: &mut GraphStore) {
+    pub fn recreate_framebuffer(&mut self, device: &Arc<Device>) {
         self.framebuffers = Self::window_size_dependent_setup(
             &self.images,
             self.render_pass.clone(),
-            &mut graph_store.viewport,
+            device
         );
+    }
+
+    pub fn recreate_pipline(&mut self, graph_store: &GraphStore, device: &Arc<Device>) {
+        self.graph_pipeline = Self::create_graphics_pipeline(&graph_store, &self.render_pass, &device, &self.images);
     }
 
     pub fn create_previous_frame_end(base: &Base) -> Option<Box<dyn GpuFuture>> {

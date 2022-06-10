@@ -1,8 +1,9 @@
 mod base;
 mod graphics;
+use std::time::Instant;
 use base::{Base, BaseOptions};
 use bytemuck::{Pod, Zeroable};
-use cgmath::{Matrix3, Matrix4, Point3, Rad};
+use cgmath::{Matrix3, Matrix4, Point3, Rad, Vector3};
 use std::sync::Arc;
 use vulkano::{
     buffer::{
@@ -99,17 +100,13 @@ fn main() {
     let mut graph_store = GraphStore {
         vs,
         fs,
-        viewport: Viewport {
-            origin: [0.0, 0.0],
-            dimensions: [0.0, 0.0],
-            depth_range: -2.0..2.0,
-        },
         recreate_swapchain: false,
     };
     let mut graph_mgr = GraphMgr::init(&base, &window_mgr, &mut graph_store);
 
     let buffer_pool_verteices = CpuBufferPool::new(base.device.clone(), BufferUsage::all());
     let buffer_pool_uniforms = CpuBufferPool::new(base.device.clone(), BufferUsage::all());
+    let buffer_pool_indices = CpuBufferPool::new(base.device.clone(), BufferUsage::all());
 
     // In the loop below we are going to submit commands to the GPU. Submitting a command produces
     // an object that implements the `GpuFuture` trait, which holds the resources for as long as
@@ -117,6 +114,8 @@ fn main() {
     //
     // Destroying the `GpuFuture` blocks until the GPU is finished executing it. In order to avoid
     // that, we store the submission of the previous frame here.
+
+    let rotation_start = Instant::now();
 
     window_mgr.event_loop.run(move |event, _, control_flow| {
         match event {
@@ -156,7 +155,8 @@ fn main() {
                     graph_mgr.images = new_images;
                     // Because framebuffers contains an Arc on the old swapchain, we need to
                     // recreate framebuffers as well.
-                    graph_mgr.recreate_framebuffer(&mut graph_store);
+                    graph_mgr.recreate_framebuffer(&base.device);
+                    graph_mgr.recreate_pipline(&graph_store, &base.device);
                     graph_store.recreate_swapchain = false;
                 }
 
@@ -185,33 +185,81 @@ fn main() {
                 }
 
                 // Specify the color to clear the framebuffer with i.e. blue
-                let clear_values = vec![[1.0, 1.0, 1.0, 1.0].into()];
-
+                
+                
                 let vertices = [
                     Vertex {
-                        position: [0.0, 0.0, 0.5],
+                        position: [-20.0, -20.0, 50.0],
                     },
                     Vertex {
-                        position: [0.25, 0.5, 0.5],
+                        position: [-20.0, 20.0, 50.0],
                     },
                     Vertex {
-                        position: [0.5, 0.25, 0.5],
+                        position: [20.0, 20.0, 50.0],
+                    },
+                    Vertex {
+                        position: [20.0, -20.0, 50.0],
+                    },
+
+                    Vertex {
+                        position: [-20.0, -20.0, 20.0],
+                    },
+                    Vertex {
+                        position: [-20.0, 20.0, 20.0],
+                    },
+                    Vertex {
+                        position: [20.0, 20.0, 20.0],
+                    },
+                    Vertex {
+                        position: [20.0, -20.0, 20.0],
                     },
                 ];
 
-                let view = Matrix4::from_angle_x(Rad(-45.0));
+                let indices: Vec<u16> = vec![
+                    0,1,2,
+                    0,2,3,
 
-                println!("{:?}",view);
+                    7,5,4,
+                    7,5,6
+                ];
 
-                if true{
-                    panic!();
-                }
+                let uniform_data = {
 
-                let uniform_data = vs::ty::Data { view: view.into() };
+                    let elapsed = rotation_start.elapsed();
+                    let rotation =
+                        elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1_000_000_000.0;
+                    let rotation = Matrix3::from_angle_y(Rad(rotation as f32));
+
+                    // note: this teapot was meant for OpenGL where the origin is at the lower left
+                    //       instead the origin is at the upper left in Vulkan, so we reverse the Y axis
+                    let aspect_ratio =
+                        graph_mgr.swapchain.image_extent()[0] as f32 / graph_mgr.swapchain.image_extent()[1] as f32;
+                    let proj = cgmath::perspective(
+                        Rad(std::f32::consts::FRAC_PI_2),
+                        aspect_ratio,
+                        0.01,
+                        100.0,
+                    );
+                    let view = Matrix4::look_at_rh(
+                        Point3::new(0.3, 0.3, 1.0),
+                        Point3::new(0.0, 0.0, 0.0),
+                        Vector3::new(0.0, -1.0, 0.0),
+                    );
+                    let scale = Matrix4::from_scale(0.01);
+
+                    vs::ty::Data {
+                        world: Matrix4::from(rotation).into(),
+                        view: (view * scale)    .into(),
+                        proj: proj.into(),
+                    }
+
+                };
+
 
                 let vertex_buffer = buffer_pool_verteices.chunk(vertices).unwrap();
+                let indices = buffer_pool_indices.chunk(indices).unwrap();
                 let uniforms = buffer_pool_uniforms.next(uniform_data).unwrap();
-
+                
                 let layout = graph_mgr
                     .graph_pipeline
                     .layout()
@@ -240,6 +288,7 @@ fn main() {
                 )
                 .unwrap();
 
+
                 builder
                     // Before we can draw, we have to *enter a render pass*. There are two methods to do
                     // this: `draw_inline` and `draw_secondary`. The latter is a bit more advanced and is
@@ -251,14 +300,13 @@ fn main() {
                     .begin_render_pass(
                         graph_mgr.framebuffers[image_num].clone(),
                         SubpassContents::Inline,
-                        clear_values,
+                        vec![[1.0, 1.0, 1.0, 1.0].into(), 1f32.into(),],
                     )
                     .unwrap()
                     // We are now inside the first subpass of the render pass. We add a draw command.
                     //
                     // The last two parameters contain the list of resources to pass to the shaders.
                     // Since we used an `EmptyPipeline` object, the objects have to be `()`.
-                    .set_viewport(0, [graph_store.viewport.clone()])
                     .bind_pipeline_graphics(graph_mgr.graph_pipeline.clone())
                     .bind_descriptor_sets(
                         PipelineBindPoint::Graphics,
@@ -267,7 +315,8 @@ fn main() {
                         set.clone(),
                     )
                     .bind_vertex_buffers(0, vertex_buffer.clone())
-                    .draw(vertex_buffer.len() as u32, 1, 0, 0)
+                    .bind_index_buffer(indices.clone())
+                    .draw_indexed(indices.len() as u32, 1, 0, 0, 0)
                     .unwrap()
                     // We leave the render pass by calling `draw_end`. Note that if we had multiple
                     // subpasses we could have called `next_inline` (or `next_secondary`) to jump to the
