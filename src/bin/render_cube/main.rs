@@ -189,20 +189,10 @@ fn main() {
                 
                 let vertices = [
                     Vertex {
-                        position: [-20.0, -20.0, 50.0],
-                    },
-                    Vertex {
-                        position: [-20.0, 20.0, 50.0],
-                    },
-                    Vertex {
-                        position: [20.0, 20.0, 50.0],
-                    },
-                    Vertex {
-                        position: [20.0, -20.0, 50.0],
-                    },
-
-                    Vertex {
                         position: [-20.0, -20.0, 20.0],
+                    },
+                    Vertex {
+                        position: [20.0, -20.0, 20.0],
                     },
                     Vertex {
                         position: [-20.0, 20.0, 20.0],
@@ -210,17 +200,45 @@ fn main() {
                     Vertex {
                         position: [20.0, 20.0, 20.0],
                     },
+
                     Vertex {
-                        position: [20.0, -20.0, 20.0],
+                        position: [-20.0, -20.0, -20.0],
+                    },
+                    Vertex {
+                        position: [20.0, -20.0, -20.0],
+                    },
+                    Vertex {
+                        position: [-20.0, 20.0, -20.0],
+                    },
+                    Vertex {
+                        position: [20.0, 20.0, -20.0],
                     },
                 ];
 
                 let indices: Vec<u16> = vec![
-                    0,1,2,
-                    0,2,3,
+                    //Top
+                    2, 6, 7,
+                    2, 3, 7,
 
-                    7,5,4,
-                    7,5,6
+                    //Bottom
+                    0, 4, 5,
+                    0, 1, 5,
+
+                    //Left
+                    0, 2, 6,
+                    0, 4, 6,
+
+                    //Right
+                    1, 3, 7,
+                    1, 5, 7,
+
+                    //Front
+                    0, 2, 3,
+                    0, 1, 3,
+
+                    //Back
+                    4, 6, 7,
+                    4, 5, 7
                 ];
 
                 let uniform_data = {
@@ -228,7 +246,7 @@ fn main() {
                     let elapsed = rotation_start.elapsed();
                     let rotation =
                         elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1_000_000_000.0;
-                    let rotation = Matrix3::from_angle_y(Rad(rotation as f32));
+                    let rotation = Matrix3::from_angle_y(Rad(rotation as f32)) * Matrix3::from_angle_x(Rad(rotation as f32)) * Matrix3::from_angle_z(Rad(rotation as f32));
 
                     // note: this teapot was meant for OpenGL where the origin is at the lower left
                     //       instead the origin is at the upper left in Vulkan, so we reverse the Y axis
