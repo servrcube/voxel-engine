@@ -15,3 +15,5 @@ vulkano-win = "0.29.0"
 
 
 colored-output = {path = "colored-output"}
+
+web-view = { version = "0.7", features = ["edge"] }

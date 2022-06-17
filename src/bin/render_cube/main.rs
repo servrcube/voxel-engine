@@ -4,7 +4,7 @@ use std::time::Instant;
 use base::{Base, BaseOptions};
 use bytemuck::{Pod, Zeroable};
 use cgmath::{Matrix3, Matrix4, Point3, Rad, Vector3};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use vulkano::{
     buffer::{
         cpu_pool::CpuBufferPoolChunk, BufferAccess, BufferContents, BufferUsage,
@@ -49,7 +49,55 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
+use std::fs::File;
+use std::io::prelude::*;
+
+use web_view::*;
+
+struct EditData{
+    size: f32,
+    rot: Matrix3<f32>,
+}
+
 fn main() {
+
+    let mut file = File::open("./src/bin/render_cube/index.html").expect("File not found");
+    let mut data = String::new();
+    file.read_to_string(&mut data).expect("Error while reading file");
+
+    let value = Arc::new(Mutex::new(
+        EditData{
+            size: 0.0,
+            rot: Matrix3::from_angle_y(Rad(0.0))*Matrix3::from_angle_x(Rad(0.0))*Matrix3::from_angle_z(Rad(0.0))
+        }
+    ));
+
+    let value_web_view = value.clone();
+    let value_main = value.clone();
+
+
+    
+
+    std::thread::spawn(move || {
+        let webview = web_view::builder()
+        .content(Content::Html(data))
+        .size(200, 100)
+        .resizable(true)
+        .debug(true)
+        .user_data("")
+        .invoke_handler(move |_,args| {
+            let mut data = value_web_view.lock().expect("lock failed");
+            *data = EditData{
+                size: args.parse::<f32>().unwrap()/100.0,
+                ..*data
+            };
+            Ok(())
+        })
+        .run()
+        .unwrap();
+    });
+    
+
     // The first step of any Vulkan program is to create an instance.
     //
     // When we create an instance, we have to pass a list of extensions that we want to enable.
@@ -136,6 +184,8 @@ fn main() {
 
                 // Whenever the window resizes we need to recreate everything dependent on the window size.
                 // In this example that includes the swapchain, the framebuffers and the dynamic state viewport.
+                
+
                 if graph_store.recreate_swapchain {
                     // Get the new dimensions of the window.
 
@@ -189,29 +239,37 @@ fn main() {
                 
                 let vertices = [
                     Vertex {
-                        position: [-20.0, -20.0, 20.0],
+                        position: [-0.2, -0.2, 0.2],
+                        color: [1.0,0.0,0.0,1.0],
                     },
                     Vertex {
-                        position: [20.0, -20.0, 20.0],
+                        position: [0.2, -0.2, 0.2],
+                        color: [0.0,1.0,0.0,1.0],
                     },
                     Vertex {
-                        position: [-20.0, 20.0, 20.0],
+                        position: [-0.2, 0.2, 0.2],
+                        color: [1.0,0.0,1.0,1.0],
                     },
                     Vertex {
-                        position: [20.0, 20.0, 20.0],
+                        position: [0.2, 0.2, 0.2],
+                        color: [1.0,0.0,0.0,1.0],
                     },
 
                     Vertex {
-                        position: [-20.0, -20.0, -20.0],
+                        position: [-0.2, -0.2, -0.2],
+                        color: [1.0,1.0,0.0,1.0],
                     },
                     Vertex {
-                        position: [20.0, -20.0, -20.0],
+                        position: [0.2, -0.2, -0.2],
+                        color: [1.0,0.0,1.0,1.0],
                     },
                     Vertex {
-                        position: [-20.0, 20.0, -20.0],
+                        position: [-0.2, 0.2, -0.2],
+                        color: [0.0,1.0,1.0,1.0],
                     },
                     Vertex {
-                        position: [20.0, 20.0, -20.0],
+                        position: [0.2, 0.2, -0.2],
+                        color: [0.0,0.5,1.0,1.0],
                     },
                 ];
 
@@ -242,11 +300,8 @@ fn main() {
                 ];
 
                 let uniform_data = {
-
-                    let elapsed = rotation_start.elapsed();
-                    let rotation =
-                        elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1_000_000_000.0;
-                    let rotation = Matrix3::from_angle_y(Rad(rotation as f32)) * Matrix3::from_angle_x(Rad(rotation as f32)) * Matrix3::from_angle_z(Rad(rotation as f32));
+                    let data = value_main.lock().unwrap();
+                    let rotation = (*data).rot;
 
                     // note: this teapot was meant for OpenGL where the origin is at the lower left
                     //       instead the origin is at the upper left in Vulkan, so we reverse the Y axis
@@ -263,7 +318,9 @@ fn main() {
                         Point3::new(0.0, 0.0, 0.0),
                         Vector3::new(0.0, -1.0, 0.0),
                     );
-                    let scale = Matrix4::from_scale(0.01);
+                    
+                    let scale = Matrix4::from_scale((*data).size);
+                    std::mem::drop(data);
 
                     vs::ty::Data {
                         world: Matrix4::from(rotation).into(),

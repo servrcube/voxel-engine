@@ -177,7 +177,3 @@ impl<'a> Base<'a> {
         .unwrap()
     }
 }
-
-fn main() {
-    // do nothing
-}

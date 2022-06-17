@@ -45,15 +45,9 @@ use vulkano_win::VkSurfaceBuild;
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
 pub struct Vertex {
     pub position: [f32; 3],
+    pub color: [f32; 4],
 }
-impl_vertex!(Vertex, position);
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
-pub struct Color {
-    pub color_in: [f32; 3],
-}
-impl_vertex!(Color, color_in);
+impl_vertex!(Vertex, position, color);
 
 const TOPOLOGY_TYPE: PrimitiveTopology = PrimitiveTopology::TriangleList;
 
