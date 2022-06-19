@@ -1,5 +1,5 @@
 [package]
-name = "VoxelEngine"
+name = "graphics"
 version = "0.1.0"
 edition = "2021"
 
@@ -14,5 +14,4 @@ winit = "0.26"
 vulkano-win = "0.29.0"
 
 
-colored-output = {path = "colored-output"}
-graphics = {path = "graphics"}
+colored-output = {path = "../colored-output"}

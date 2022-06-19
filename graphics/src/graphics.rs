@@ -1,4 +1,4 @@
-use crate::base::{Base, BaseOptions};
+use crate::base::{Base};
 use bytemuck::{Pod, Zeroable};
 use cgmath::{Matrix3, Matrix4, Point3, Rad};
 use std::sync::Arc;

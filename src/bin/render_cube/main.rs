@@ -1,9 +1,7 @@
-mod base;
-mod graphics;
 use std::time::Instant;
-use base::{Base, BaseOptions};
+use graphics::base::{Base, BaseOptions};
 use bytemuck::{Pod, Zeroable};
-use cgmath::{Matrix3, Matrix4, Point3, Rad, Vector3};
+use cgmath::{Matrix3, Matrix4, Point3, Rad, Deg, Vector3};
 use std::sync::{Arc, Mutex};
 use vulkano::{
     buffer::{
@@ -41,7 +39,7 @@ use vulkano::{
 };
 use vulkano_win::VkSurfaceBuild;
 
-use graphics::{GraphMgr, GraphStore, WindowMgr, Vertex};
+use graphics::graphics::{GraphMgr, GraphStore, WindowMgr, Vertex};
 
 use winit::{
     event::{Event, WindowEvent},
@@ -49,53 +47,12 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use std::fs::File;
-use std::io::prelude::*;
 
-use web_view::*;
 
-struct EditData{
-    size: f32,
-    rot: Matrix3<f32>,
-}
+
 
 fn main() {
 
-    let mut file = File::open("./src/bin/render_cube/index.html").expect("File not found");
-    let mut data = String::new();
-    file.read_to_string(&mut data).expect("Error while reading file");
-
-    let value = Arc::new(Mutex::new(
-        EditData{
-            size: 0.0,
-            rot: Matrix3::from_angle_y(Rad(0.0))*Matrix3::from_angle_x(Rad(0.0))*Matrix3::from_angle_z(Rad(0.0))
-        }
-    ));
-
-    let value_web_view = value.clone();
-    let value_main = value.clone();
-
-
-    
-
-    std::thread::spawn(move || {
-        let webview = web_view::builder()
-        .content(Content::Html(data))
-        .size(200, 100)
-        .resizable(true)
-        .debug(true)
-        .user_data("")
-        .invoke_handler(move |_,args| {
-            let mut data = value_web_view.lock().expect("lock failed");
-            *data = EditData{
-                size: args.parse::<f32>().unwrap()/100.0,
-                ..*data
-            };
-            Ok(())
-        })
-        .run()
-        .unwrap();
-    });
     
 
     // The first step of any Vulkan program is to create an instance.
@@ -163,7 +120,7 @@ fn main() {
     // Destroying the `GpuFuture` blocks until the GPU is finished executing it. In order to avoid
     // that, we store the submission of the previous frame here.
 
-    let rotation_start = Instant::now();
+    
 
     window_mgr.event_loop.run(move |event, _, control_flow| {
         match event {
@@ -181,6 +138,7 @@ fn main() {
             }
             Event::RedrawEventsCleared => {
                 graph_mgr.free_resources();
+
 
                 // Whenever the window resizes we need to recreate everything dependent on the window size.
                 // In this example that includes the swapchain, the framebuffers and the dynamic state viewport.
@@ -300,8 +258,7 @@ fn main() {
                 ];
 
                 let uniform_data = {
-                    let data = value_main.lock().unwrap();
-                    let rotation = (*data).rot;
+                    let rotation = Matrix4::from_angle_y(Deg(180.0));
 
                     // note: this teapot was meant for OpenGL where the origin is at the lower left
                     //       instead the origin is at the upper left in Vulkan, so we reverse the Y axis
@@ -319,8 +276,7 @@ fn main() {
                         Vector3::new(0.0, -1.0, 0.0),
                     );
                     
-                    let scale = Matrix4::from_scale((*data).size);
-                    std::mem::drop(data);
+                    let scale = Matrix4::from_scale(1.0);
 
                     vs::ty::Data {
                         world: Matrix4::from(rotation).into(),
